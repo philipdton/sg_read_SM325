@@ -291,7 +291,7 @@ int main(int argc, char * argv[])
         DiskSize  = ((*(int *)FourBytes) + 1) * BlockSize;
     }
 
-    /* 1. Prepare READ_10 command for reading basic information */
+    /* 4. Prepare READ_10 command for reading basic information */
     /************************************************************/
     memset(&io_hdr, 0, sizeof(sg_io_hdr_t));
     io_hdr.interface_id = 'S';
@@ -330,7 +330,7 @@ int main(int argc, char * argv[])
     }
 
     if (ok) { /* output result if it is available */
-	    printf("\n  STEP 1: READ BASIC INFORMATION\n");
+	    printf("\n  STEP 4: READ BASIC INFORMATION\n");
 	    printf("READ_10 duration=%u millisecs, resid=%d, msg_status=%d \n",
 	       io_hdr.duration, io_hdr.resid, (int)io_hdr.msg_status);
 	    memcpy( sense_buffer, io_hdr.sbp, sizeof(sense_buffer));
@@ -371,9 +371,9 @@ int main(int argc, char * argv[])
         printf("HalfLBA per MU = %d\n\n", HalfLBA_per_MU);
     }
 
-    /* 2. Prepare READ_10 command to get Initial and Current BadBlock numbers for each MU */
+    /* 5. Prepare READ_10 command to get Initial and Current BadBlock numbers for each MU */
     /**************************************************************************************/
-    printf("\n  STEP 2: READ EACH MU INITIAL AND CURRENT BADBLOCKS\n");
+    printf("\n  STEP 5: READ EACH MU INITIAL AND CURRENT BADBLOCKS\n");
     io_hdr.cmd_len = sizeof(r10CmdBlk[init_and_current_badblocks]);
     io_hdr.dxfer_len = READBB_REPLY_LEN;
     io_hdr.dxferp = inBuffBB;
@@ -471,7 +471,7 @@ int main(int argc, char * argv[])
 	        }
         }  /* end of for loop each FBlk */
         
-        /* 3. Calculate Initial Spare Numbers for each MU */
+        /* 5+. Calculate Initial Spare Numbers for each MU */
         /**************************************************/
         if (mu == 0)
         {
@@ -485,9 +485,9 @@ int main(int argc, char * argv[])
     }  /* end of for loop each mu */
 
         
-    /* 4. Get Current Spare Numbers for each MU */
+    /* 6. Get Current Spare Numbers for each MU */
     /********************************************/
-    printf("\n  STEP 4: READ CURRENT SPARE BLOCKS FOR EACH MU \n");
+    printf("\n  STEP 6: READ CURRENT SPARE BLOCKS FOR EACH MU \n");
     io_hdr.cmd_len = sizeof(r10CmdBlk[current_spare_blocks_1]);
     io_hdr.dxfer_len = READ10_REPLY_LEN;
     io_hdr.dxferp = inBuff;
@@ -617,6 +617,7 @@ int main(int argc, char * argv[])
         
     }  /* end of for loop each mu */
 
+    /******************************/
     /*    Print out the results   */
     /******************************/
     printf("\n   *********** THE RESULT IS: **********\n\n");

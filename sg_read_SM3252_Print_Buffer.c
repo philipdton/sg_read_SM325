@@ -57,7 +57,7 @@ int main(int argc, char * argv[])
     char * file_name = 0;
     char ebuff[EBUFF_SZ];
     unsigned char sense_buffer[32];
-    unsigned char FourBytes[4];
+    unsigned char FourBytes[4], TwoBytes[2];
     unsigned char Viking[] = "VT";
     unsigned char filename[22];
 
@@ -70,7 +70,7 @@ int main(int argc, char * argv[])
                {0xF1, 0x03, 0, 0, 0, 0, 0, 0, 0x20, 0, 0, 1, 0, 0, 0, 0},
                {0xF0, 0x2C, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} };
     unsigned char inBuff[READ10_REPLY_LEN], saveBuff[READ10_REPLY_LEN];
-    unsigned int Total_MU=0, Total_LBA=0, LBA_per_MU=0, HalfLBA_per_MU=0, LED_result=0;
+    unsigned int Total_MU=0, Total_LBA=0, LBA_per_MU=0, HalfLBA_per_MU=0;
     
     unsigned char inqCmdBlk [2][INQ_CMD_LEN] =
              { {0x12, 0, 0, 0, INQ_REPLY_LEN, 0}, {0x12, 0, 0x80, 0, INQ_REPLY_LEN, 0} };
@@ -81,6 +81,7 @@ int main(int argc, char * argv[])
               {0x25, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     unsigned char capBuff[READCAP_REPLY_LEN];
     unsigned int  BlockSize=0, DiskSize=0;
+    ushort        VID, PID;
     unsigned char LED_Status_Byte=0, LED_Ready=0, LED_Busy=0;
     
     time( &rawtime );
@@ -161,18 +162,25 @@ int main(int argc, char * argv[])
         char * p = (char *)inqBuff;
         int f = (int)*(p + 7);
 #ifdef DEBUG_FLAG
-	    printf(" inquiry buffer  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F\n");
-	    printf("                 -----------------------------------------------------------------------------------------------\n");
+        printf(" Buffer from INQUIRY command:\n");
+        printf(" inquiry buffer  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F\n");
+        printf("                 -----------------------------------------------\n");
    		memcpy( inqBuff, io_hdr.dxferp, sizeof(inqBuff));
-	    for (i=0; i<16; i++)  /* 16 rows */
-	    {
-	      printf("       %3d-%3d = ", i*j, (i*j)+31);
+        for (i=0; i<32; i++)  /* 32 rows */
+        {
+          printf("       %3d-%3d = ", i*j, (i*j)+15);
 
-	      for (j=0; j<32; j++)
-	         printf("%02X ", inqBuff[(i*32)+j]);
-	   
-	      printf("\n");
-	    }
+          for (j=0; j<16; j++)
+             printf("%02X ", inBuff[(i*16)+j]);
+
+          printf("\n");
+          printf("Char   %3d-%3d = ", i*j, (i*j)+15);
+
+          for (j=0; j<16; j++)
+             printf("%2c ", inBuff[(i*16)+j]);
+
+          printf("\n");
+        }
         printf("\n");
 #endif
    		memcpy( VendorID, p + 8, sizeof(VendorID));
@@ -399,11 +407,11 @@ int main(int argc, char * argv[])
 	    /* Save a back up buffer to compare it later to saveBuff */
 	    memcpy( saveBuff, io_hdr.dxferp, sizeof(saveBuff));
 
-#ifdef DEBUG_FLAG1
-	    printf("\n  STEP 2: READ LED SETTING INFORMATION\n");
+#ifdef DEBUG_FLAG
+        printf("\n  STEP 2: READ LED SETTING INFORMATION FROM CID TABLE\n");
 	    /* Print out io_hdr.deferp */
-	    printf("   reply buffer  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F\n");
-	    printf("                 -----------------------------------------------------------------------------------------------\n");
+        printf("   reply buffer  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F\n");
+        printf("                 -----------------------------------------------\n");
 	    for (i=0; i<32; i++)  /* 32 rows */
 	    {
 	      printf("       %3d-%3d = ", i*j, (i*j)+15);
@@ -443,6 +451,13 @@ int main(int argc, char * argv[])
             return 0;
         }
         
+        TwoBytes[0] = inBuff[0x08];
+        TwoBytes[1] = inBuff[0x09];
+        VID  = *(ushort *)TwoBytes;
+        TwoBytes[0] = inBuff[0x0A];
+        TwoBytes[1] = inBuff[0x0B];
+        PID  = *(ushort *)TwoBytes;
+
         LED_Status_Byte = inBuff[0x187];
         LED_Ready       = (LED_Status_Byte & 0x06) >> 1;
         LED_Busy        = (LED_Status_Byte & 0x60) >> 5;
@@ -455,259 +470,14 @@ int main(int argc, char * argv[])
 #endif
     }
 
-    /* 3. Prepare READ_10 command for writing LED setting information */
-    /************************************************************/
-#ifdef DEBUG_FLAG
-	printf("\n  STEP 3: WRITE LED SETTING INFORMATION\n");
-#endif
-    if (inBuff[0x187] == 0x82)
-    {
-        LED_result = 0;
-        printf("Already configured ");
-    }
-    else if (inBuff[0x187] == 0x80)
-    {
-        inBuff[0x187] = 0x82;
-#ifdef DEBUG_FLAG
-        printf("Updating the CID table...\n");
-#endif
-    }
-    
-    memset(&io_hdr, 0, sizeof(sg_io_hdr_t));
-    io_hdr.interface_id = 'S';
-    io_hdr.cmd_len = sizeof(r10CmdBlk[write_LED]);
-    /* io_hdr.iovec_count = 0; */  /* memset takes care of this */
-    io_hdr.mx_sb_len = sizeof(sense_buffer);
-    io_hdr.dxfer_direction = SG_DXFER_TO_DEV;
-    io_hdr.dxfer_len = READ10_REPLY_LEN;
-    io_hdr.dxferp = inBuff;
-    io_hdr.cmdp = r10CmdBlk[write_LED];
-    io_hdr.sbp = sense_buffer;
-    io_hdr.timeout = 20000;     /* 20000 millisecs == 20 seconds */
-    /* io_hdr.flags = 0; */     /* take defaults: indirect IO, etc */
-    /* io_hdr.pack_id = 0; */
-    /* io_hdr.usr_ptr = NULL; */
-
-    if (ioctl(sg_fd, SG_IO, &io_hdr) < 0) {
-	   perror("sg_read_SM325: Inquiry SG_IO ioctl error");
-	   close(sg_fd);
-	   return 1;
-    }
-
-    /* now for the error processing */
-    ok = 0;
-    switch (sg_err_category3(&io_hdr)) {
-       case SG_LIB_CAT_CLEAN:
-	      ok = 1;
-	      break;
-       case SG_LIB_CAT_RECOVERED:
-	      printf("Recovered error on READ_10, continuing\n");
-	      ok = 1;
-	      break;
-       default: /* won't bother decoding other categories */
-	      sg_chk_n_print3("READ_10 command error", &io_hdr, 1);
-	      break;
-    }
-
-    if (ok) { /* output result if it is available */
-	    memcpy( sense_buffer, io_hdr.sbp, sizeof(sense_buffer));
-
-#ifdef DEBUG_FLAG1
-	    /* Print out io_hdr.deferp */
-	    printf("   reply buffer  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F\n");
-	    printf("                 -----------------------------------------------------------------------------------------------\n");
-	    memcpy( inBuff, io_hdr.dxferp, sizeof(inBuff));
-	    for (i=0; i<16; i++)  /* 16 rows */
-	    {
-	      printf("       %3d-%3d = ", i*j, (i*j)+31);
-
-	      for (j=0; j<32; j++)
-	      {
-	         printf("%02X ", inBuff[(i*32)+j]);
-	         
-	         if (inBuff[(i*32)+j] != saveBuff[(i*32)+j])
-	         {
-   	            printf("<* ");
-	         }
-	      }
-	   
-	      printf("\n");
-	    }
-        printf("\n");
-#endif
-        LED_Status_Byte = inBuff[0x187];
-        LED_Ready       = (LED_Status_Byte & 0x06) >> 1;
-        LED_Busy        = (LED_Status_Byte & 0x60) >> 5;
-
-#ifdef DEBUG_FLAG
-        printf("LED_Status_Byte = 0x%X\n", LED_Status_Byte);
-        printf("LED_Ready       = %d\n", LED_Ready);
-        printf("LED_Busy        = %d\n", LED_Busy);
-        printf("Done\n");
-#endif
-    }
-
-    /* 4. Prepare READ_10 command for reading LED setting information */
-    /************************************************************/
-    memset(&io_hdr, 0, sizeof(sg_io_hdr_t));
-    io_hdr.interface_id = 'S';
-    io_hdr.cmd_len = sizeof(r10CmdBlk[read_LED]);
-    /* io_hdr.iovec_count = 0; */  /* memset takes care of this */
-    io_hdr.mx_sb_len = sizeof(sense_buffer);
-    io_hdr.dxfer_direction = SG_DXFER_FROM_DEV;
-    io_hdr.dxfer_len = READ10_REPLY_LEN;
-    io_hdr.dxferp = inBuff;
-    io_hdr.cmdp = r10CmdBlk[read_LED];
-    io_hdr.sbp = sense_buffer;
-    io_hdr.timeout = 20000;     /* 20000 millisecs == 20 seconds */
-    /* io_hdr.flags = 0; */     /* take defaults: indirect IO, etc */
-    /* io_hdr.pack_id = 0; */
-    /* io_hdr.usr_ptr = NULL; */
-
-    if (ioctl(sg_fd, SG_IO, &io_hdr) < 0) {
-	   perror("sg_read_SM325: Inquiry SG_IO ioctl error");
-	   close(sg_fd);
-	   return 1;
-    }
-
-    /* now for the error processing */
-    ok = 0;
-    switch (sg_err_category3(&io_hdr)) {
-       case SG_LIB_CAT_CLEAN:
-	      ok = 1;
-	      break;
-       case SG_LIB_CAT_RECOVERED:
-	      printf("Recovered error on READ_10, continuing\n");
-	      ok = 1;
-	      break;
-       default: /* won't bother decoding other categories */
-	      sg_chk_n_print3("READ_10 command error", &io_hdr, 1);
-	      break;
-    }
-
-    if (ok) { /* output result if it is available */
-	    memcpy( sense_buffer, io_hdr.sbp, sizeof(sense_buffer));
-
-#ifdef DEBUG_FLAG
-	    printf("\n  STEP 4: READ LED SETTING INFORMATION AFTER A WRITE\n");
-	    /* Print out io_hdr.deferp */
-	    printf("   reply buffer  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F\n");
-	    printf("                 -----------------------------------------------------------------------------------------------\n");
-	    memcpy( inBuff, io_hdr.dxferp, sizeof(inBuff));
-	    for (i=0; i<16; i++)  /* 16 rows */
-	    {
-	      printf("       %3d-%3d = ", i*j, (i*j)+31);
-
-	      for (j=0; j<32; j++)
-	         printf("%02X ", inBuff[(i*32)+j]);
-	   
-	      printf("\n");
-	    }
-        printf("\n");
-#endif
-
-        /* Compare the back up buffer against the newly read buffer to ensure no changes */
-        for (i=0; i<sizeof(inBuff); i++)
-        {
-            if (inBuff[i] != saveBuff[i])
-            {
-                if (i == 0x187) /* LED Byte */
-                {
-                    continue;
-                }
-                else
-                {
-                    LED_result = 2;
-                    printf("FAILED - Buffer comparison failed.\n");
-                    fprintf(pFile, "%s, %s, FAILED Buffer Comparison, %s", UnitProductNumber, UnitSerialNumber, asctime(timeinfo));
-                }
-            }
-        }
-        
-        LED_Status_Byte = inBuff[0x187];
-        LED_Ready       = (LED_Status_Byte & 0x06) >> 1;
-        LED_Busy        = (LED_Status_Byte & 0x60) >> 5;
-
-        if (inBuff[0x187] == 0x82)
-        {
-            LED_result = 1;
-            printf("PASSED.\n");
-            fprintf(pFile, "%s, %s, PASSED, %s", UnitProductNumber, UnitSerialNumber, asctime(timeinfo));
-        }
-        else 
-        {
-            LED_result = 2;
-            printf("FAILED - Re-test or reject.\n");
-            fprintf(pFile, "%s, %s, FAILED, %s", UnitProductNumber, UnitSerialNumber, asctime(timeinfo));
-        }
-    }
-    
-    /* 5. Prepare READ_10 command for reset the drive */
-    /************************************************************/
-#ifdef DEBUG_FLAG
-	printf("\n  STEP 5: RESET THE USB DRIVE...\n");
-#endif
-    memset(&io_hdr, 0, sizeof(sg_io_hdr_t));
-    io_hdr.interface_id = 'S';
-    io_hdr.cmd_len = sizeof(r10CmdBlk[reset_drive]);
-    /* io_hdr.iovec_count = 0; */  /* memset takes care of this */
-    io_hdr.mx_sb_len = sizeof(sense_buffer);
-    io_hdr.dxfer_direction = SG_DXFER_TO_DEV;
-    io_hdr.dxfer_len = READ10_REPLY_LEN;
-    io_hdr.dxferp = inBuff;
-    io_hdr.cmdp = r10CmdBlk[reset_drive];
-    io_hdr.sbp = sense_buffer;
-    io_hdr.timeout = 20000;     /* 20000 millisecs == 20 seconds */
-    /* io_hdr.flags = 0; */     /* take defaults: indirect IO, etc */
-    /* io_hdr.pack_id = 0; */
-    /* io_hdr.usr_ptr = NULL; */
-
-    if (ioctl(sg_fd, SG_IO, &io_hdr) < 0) {
-	   perror("sg_read_SM325: Inquiry SG_IO ioctl error");
-	   close(sg_fd);
-	   return 1;
-    }
-
-    /* now for the error processing */
-    ok = 0;
-    switch (sg_err_category3(&io_hdr)) {
-       case SG_LIB_CAT_CLEAN:
-	      ok = 1;
-	      break;
-       case SG_LIB_CAT_RECOVERED:
-	      printf("Recovered error on READ_10, continuing\n");
-	      ok = 1;
-	      break;
-       default: /* won't bother decoding other categories */
-	      break;
-    }
-
-    if (ok) { /* output result if it is available */
-	    memcpy( sense_buffer, io_hdr.sbp, sizeof(sense_buffer));
-
-#ifdef DEBUG_FLAG
-	    /* Print out io_hdr.deferp */
-	    printf("   reply buffer  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F\n");
-	    printf("                 -----------------------------------------------------------------------------------------------\n");
-	    memcpy( inBuff, io_hdr.dxferp, sizeof(inBuff));
-	    for (i=0; i<16; i++)  /* 16 rows */
-	    {
-	      printf("       %3d-%3d = ", i*j, (i*j)+31);
-
-	      for (j=0; j<32; j++)
-	         printf("%02X ", inBuff[(i*32)+j]);
-	   
-	      printf("\n");
-	    }
-        printf("\n");
-#endif
-    }
 
     /*    Print out the results   */
     /******************************/
-#ifdef DEBUG_FLAG
+#ifdef DEBUG_FLAG1
     printf("\n   *********** THE RESULT IS: **********\n\n");
 
+    printf("VID                    : 0x%04X\n", VID);
+    printf("PID                    : 0x%04X\n", PID);
     printf("Vendor Identification  : %.8s\n", VendorID);
     printf("Product Identification : %.16s\n", ProductID);
     printf("Product Revision Level : %.4s\n", ProductRevision);
@@ -715,20 +485,6 @@ int main(int argc, char * argv[])
     printf("Block Size : %d Bytes\n", BlockSize);
     printf("Disk Size  : %.2f MiB or %.2f MB\n\n", (float)(DiskSize / BYTES_IN_MiB), (float)(DiskSize / BYTES_IN_MB));
 
-    switch (LED_result)
-    {
-       case 0:
-          printf("The drive has already been updated.\n");
-          break;
-       case 1:
-          printf("PASSED.\n");
-          break;
-       case 2:
-          printf("FAILED.  Re-test the drive or send to RMA.\n");
-          break;
-       default:   
-          break;
-    }
 #endif
     
     fclose(pFile);
